@@ -417,11 +417,13 @@ function boot(text,isSample){
 async function load(){
   if(!CSV_URL||CSV_URL==="PASTE_PUBLISHED_CSV_URL_HERE"){boot(SAMPLE,true);return;}
   try{
-    const res=await fetch(CSV_URL,{cache:"no-store"});
+    const opt={cache:"no-store"};
+    if(typeof AbortSignal!=="undefined"&&AbortSignal.timeout)opt.signal=AbortSignal.timeout(15000);
+    const res=await fetch(CSV_URL,opt);
     if(!res.ok) throw new Error(res.status);
     boot(await res.text(),false);
   }catch(err){
-    showStatus("スプレッドシートを読み込めませんでした。公開設定と URL をご確認ください。",true);
+    showStatus("スプレッドシートを読み込めませんでした。「⟳ 更新」で再試行するか、公開設定と URL をご確認ください。",true);
   }
 }
 

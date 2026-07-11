@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>サッカー部スケジュール</title>
+<style>
+  :root{
+    --bg:#eef2ee; --panel:#fff; --ink:#16241d; --muted:#6b7b72; --line:#dbe3dd;
+    --pitch:#12734a; --wknd:#f6f4ee;
+    --A:#1d4ed8; --A-bg:#e8eefc; --B:#d1490b; --B-bg:#fceee5; --N:#7c3aed; --N-bg:#f1eafd;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,system-ui,sans-serif;-webkit-text-size-adjust:100%}
+  .wrap{max-width:1120px;margin:0 auto;padding:18px 13px 60px}
+
+  .kicker{font-size:12px;letter-spacing:.2em;color:var(--pitch);font-weight:700;text-transform:uppercase}
+  h1{margin:3px 0 2px;font-size:clamp(22px,5vw,32px);font-weight:800;letter-spacing:-.01em}
+  .sub{color:var(--muted);font-size:13px}
+
+  .bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:15px 0}
+  .spacer{flex:1 1 auto}
+
+  /* view toggle */
+  .toggle{display:inline-flex;background:var(--panel);border:1.5px solid var(--line);border-radius:999px;padding:3px}
+  .toggle button{border:none;background:none;border-radius:999px;padding:7px 16px;font-size:14px;font-weight:800;color:var(--muted);cursor:pointer}
+  .toggle button.on{background:var(--pitch);color:#fff}
+
+  /* month nav */
+  .monthnav{display:inline-flex;align-items:center;gap:10px}
+  .monthnav button{width:34px;height:34px;border-radius:50%;border:1.5px solid var(--line);background:var(--panel);font-size:16px;font-weight:800;color:var(--ink);cursor:pointer}
+  .monthnav button:disabled{opacity:.3;cursor:default}
+  .monthlabel{font-size:17px;font-weight:800;min-width:96px;text-align:center}
+
+  /* team filters */
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:16px}
+  .chip{border:1.5px solid var(--line);background:var(--panel);border-radius:999px;padding:6px 13px;font-size:13px;font-weight:700;cursor:pointer;color:var(--muted);display:inline-flex;align-items:center;gap:6px}
+  .chip .dot{width:9px;height:9px;border-radius:50%}
+  .chip[data-team="A"] .dot{background:var(--A)}.chip[data-team="B"] .dot{background:var(--B)}.chip[data-team="N"] .dot{background:var(--N)}
+  .chip[data-team="A"].on{background:var(--A-bg);border-color:var(--A);color:var(--A)}
+  .chip[data-team="B"].on{background:var(--B-bg);border-color:var(--B);color:var(--B)}
+  .chip[data-team="N"].on{background:var(--N-bg);border-color:var(--N);color:var(--N)}
+
+  /* status banners */
+  .note{background:#fff6e0;border:1px solid #f0d98a;color:#6b5410;border-radius:10px;padding:11px 13px;font-size:13px;line-height:1.55;margin-bottom:14px}
+  .note code{background:#00000010;padding:1px 5px;border-radius:4px;font-size:12px}
+  .status{color:var(--muted);font-size:13px;padding:30px 4px;text-align:center}
+  .status.err{color:#a3341f}
+
+  /* month grid */
+  .dowrow{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+  .dow{text-align:center;font-size:12px;font-weight:800;color:var(--muted);padding:5px 0}
+  .dow.sun{color:#c0392b}.dow.sat{color:#1d4ed8}
+  .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+  .cell{background:var(--panel);border:1px solid var(--line);border-radius:10px;min-height:112px;padding:7px;display:flex;flex-direction:column;gap:5px}
+  .cell.empty{background:transparent;border:none}
+  .cell.wknd{background:var(--wknd)}
+  .cell.today{outline:2px solid var(--pitch);outline-offset:-2px}
+  .daytop{display:flex;align-items:baseline;justify-content:space-between;gap:5px}
+  .dnum{font-size:15px;font-weight:800;line-height:1}
+  .dnum.sun{color:#c0392b}.dnum.sat{color:#1d4ed8}
+  .venue{font-size:10.5px;color:var(--muted);text-align:right;line-height:1.25;max-width:66%}
+  .ev{border-radius:7px;padding:4px 6px;font-size:12px;line-height:1.3;border-left:3px solid}
+  .ev .t{font-weight:800;font-variant-numeric:tabular-nums;display:block;font-size:11px;opacity:.9}
+  .ev .c{display:block}
+  .ev.A{background:var(--A-bg);border-color:var(--A);color:#132a63}
+  .ev.B{background:var(--B-bg);border-color:var(--B);color:#6b2606}
+  .ev.N{background:var(--N-bg);border-color:var(--N);color:#3f1a75}
+  .ev .badge{font-size:9px;font-weight:800;opacity:.7;margin-right:3px}
+  .rest{color:#b9c2bb;font-size:11px;font-weight:700}
+
+  /* agenda */
+  .agenda{display:flex;flex-direction:column;gap:8px}
+  .arow{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:11px 13px;display:flex;gap:12px}
+  .arow.wknd{background:var(--wknd)}
+  .arow.today{outline:2px solid var(--pitch);outline-offset:-2px}
+  .adate{flex:0 0 44px;text-align:center}
+  .adate .n{font-size:22px;font-weight:800;line-height:1}
+  .adate .w{font-size:12px;font-weight:700;color:var(--muted)}
+  .adate .n.sun,.adate .w.sun{color:#c0392b}.adate .n.sat,.adate .w.sat{color:#1d4ed8}
+  .abody{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
+  .avenue{font-size:12px;color:var(--muted);font-weight:600}
+  .arow .ev{font-size:13px}
+
+  .hidden{display:none!important}
+  footer{margin-top:24px;color:var(--muted);font-size:12px;line-height:1.6}
+  .refreshed{font-size:11px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="kicker">Josho Football Club · Schedule</div>
+  <h1>サッカー部スケジュール</h1>
+  <div class="sub">A・B・新入生／保護者用</div>
+
+  <div id="setupNote" class="note hidden"></div>
+
+  <div class="bar">
+    <div class="toggle" id="viewToggle">
+      <button data-view="grid" class="on">月間</button>
+      <button data-view="agenda">日次</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="monthnav">
+      <button id="prevM" aria-label="前の月">‹</button>
+      <div class="monthlabel" id="monthLabel">—</div>
+      <button id="nextM" aria-label="次の月">›</button>
+    </div>
+  </div>
+
+  <div class="chips" id="chips">
+    <button class="chip on" data-team="A"><span class="dot"></span>Aチーム</button>
+    <button class="chip on" data-team="B"><span class="dot"></span>Bチーム</button>
+    <button class="chip on" data-team="N"><span class="dot"></span>新入生</button>
+  </div>
+
+  <div id="status" class="status">読み込み中…</div>
+
+  <div id="gridView" class="hidden">
+    <div class="dowrow"><div class="dow sun">日</div><div class="dow">月</div><div class="dow">火</div><div class="dow">水</div><div class="dow">木</div><div class="dow">金</div><div class="dow sat">土</div></div>
+    <div class="grid" id="grid"></div>
+  </div>
+  <div id="agendaView" class="agenda hidden"></div>
+
+  <footer>
+    <div>時間のみ＝練習／vs◯◯＝試合・練習試合。予定はスプレッドシートと連動しています。</div>
+    <div class="refreshed" id="refreshed"></div>
+  </footer>
+</div>
+
+<script>
+/* ============================================================
+   設定：ここにスプレッドシートの「ウェブに公開」CSV URL を貼る
+   File → 共有 → ウェブに公開 → 対象シート → 形式=カンマ区切り(.csv) → 公開
+   例: https://docs.google.com/spreadsheets/d/e/2PACX-XXXX/pub?output=csv
+   ============================================================ */
+const CSV_URL = "https://docs.google.com/spreadsheets/d/1S2VVPDtuKOMLYpWn2GUJ-IAZdnAioH02X8tE3RmQUy4/gviz/tq?tqx=out:csv&gid=610564075";
+const YEAR = 2026;            // 予定の年（年をまたぐ場合のみ調整）
+/* ============================================================ */
+
+const TEAMS=["A","B","N"], LABEL={A:"A",B:"B",N:"新"};
+const active=new Set(TEAMS);
+let events=[];          // {date:Date, ymKey, day, venue, A:[t,c], B:.., N:..}
+let months=[];          // ["2026-7", ...]
+let mIdx=0;
+let view = window.innerWidth<=720 ? "agenda" : "grid";
+
+/* ---- サンプル（URL未設定時のプレビュー用） ---- */
+const SAMPLE=`,,,Aチーム,,Bチーム,,新入生,
+日にち,曜日,施設,時間,内容,時間,内容,時間,内容
+7/4,土,水口スポーツの森,12:45~15:00,vs水口,,,,
+7/5,日,,9:30~13:00,vs滝川第二,,,,登竜門第7節 vs京都先端大附
+7/11,土,Jグリーン,7:00~9:00,,9:00~11:00,vsヌベール,,
+7/22,水,Jグリーン堺,14:10~17:00,堺ユース,終日,vs清明、他,,vs神戸弘陵学園
+7/27,月,,13:00~17:00,vs千里高校,,石川遠征,終日,vs寒川高校`;
+
+/* ---- CSV パーサ（引用符対応） ---- */
+function parseCSV(text){
+  const rows=[];let row=[],f="",q=false;
+  for(let i=0;i<text.length;i++){const ch=text[i];
+    if(q){ if(ch==='"'){ if(text[i+1]==='"'){f+='"';i++;} else q=false;} else f+=ch; }
+    else{ if(ch==='"')q=true; else if(ch===','){row.push(f);f="";}
+      else if(ch==='\n'){row.push(f);rows.push(row);row=[];f="";}
+      else if(ch==='\r'){} else f+=ch; }
+  }
+  if(f.length||row.length){row.push(f);rows.push(row);}
+  return rows;
+}
+
+function buildEvents(rows){
+  const out=[];
+  for(const r of rows){
+    const raw=(r[0]||"").trim().split(" ")[0];   // 時刻部分があれば除去
+    let yr=YEAR,mo,da,m;
+    if(m=raw.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/)){yr=+m[1];mo=+m[2];da=+m[3];}      // Y/M/D, Y-M-D
+    else if(m=raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)){mo=+m[1];da=+m[2];yr=+m[3];}     // M/D/Y
+    else if(m=raw.match(/^(\d{1,2})\/(\d{1,2})$/)){mo=+m[1];da=+m[2];}                        // M/D
+    else continue;                                                                            // ヘッダ行や空行はスキップ
+    const date=new Date(yr,mo-1,da);
+    const cell=(i)=>((r[i]||"").trim());
+    const pair=(ti,ci)=>{const t=cell(ti),c=cell(ci);return (t||c)?[t,c]:null;};
+    out.push({date,ymKey:`${yr}-${mo}`,yr,mo,day:da,venue:cell(2),
+      A:pair(3,4),B:pair(5,6),N:pair(7,8)});
+  }
+  return out;
+}
+
+function computeMonths(){
+  const set=[...new Set(events.map(e=>e.ymKey))];
+  set.sort((a,b)=>{const[,ma]=a.split("-"),[,mb]=b.split("-");return (+ma)-(+mb);});
+  months=set;
+  const now=new Date();
+  const nowKey=`${now.getFullYear()}-${now.getMonth()+1}`;
+  mIdx=Math.max(0,months.indexOf(nowKey)); // 今月があれば今月、なければ先頭
+  if(months.indexOf(nowKey)<0) mIdx=0;
+}
+
+function evHTML(team,arr){
+  if(!arr) return "";
+  const [t,c]=arr;
+  const time=t?`<span class="t">${esc(t)}</span>`:"";
+  const body=c?`<span class="c">${esc(c)}</span>`:(t?`<span class="c">練習</span>`:"");
+  return `<div class="ev ${team}"><span class="badge">${LABEL[team]}</span>${time}${body}</div>`;
+}
+function esc(s){return s.replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));}
+function dayEvents(rec){return TEAMS.filter(t=>active.has(t)&&rec[t]).map(t=>evHTML(t,rec[t])).join("");}
+function isToday(date){const n=new Date();return n.getFullYear()===date.getFullYear()&&n.getMonth()===date.getMonth()&&n.getDate()===date.getDate();}
+
+function render(){
+  if(!months.length){return;}
+  const [y,mo]=months[mIdx].split("-").map(Number);
+  document.getElementById("monthLabel").textContent=`${y}年${mo}月`;
+  document.getElementById("prevM").disabled = mIdx<=0;
+  document.getElementById("nextM").disabled = mIdx>=months.length-1;
+  const byDay={}; events.filter(e=>e.yr===y&&e.mo===mo).forEach(e=>byDay[e.day]=e);
+
+  // grid
+  const grid=document.getElementById("grid"); grid.innerHTML="";
+  const first=new Date(y,mo-1,1).getDay();
+  const days=new Date(y,mo,0).getDate();
+  for(let i=0;i<first;i++){const e=document.createElement("div");e.className="cell empty";grid.appendChild(e);}
+  for(let d=1;d<=days;d++){
+    const date=new Date(y,mo-1,d),dow=date.getDay(),rec=byDay[d];
+    const cls=["cell"];if(dow===0||dow===6)cls.push("wknd");if(isToday(date))cls.push("today");
+    const dn=dow===0?"sun":dow===6?"sat":"";
+    const evs=rec?dayEvents(rec):"";
+    const venue=(rec&&rec.venue)?`<span class="venue">${esc(rec.venue)}</span>`:"";
+    const cell=document.createElement("div");cell.className=cls.join(" ");
+    cell.innerHTML=`<div class="daytop"><span class="dnum ${dn}">${d}</span>${venue}</div>${evs}`;
+    grid.appendChild(cell);
+  }
+
+  // agenda（予定のある日だけ）
+  const a=document.getElementById("agendaView");a.innerHTML="";
+  const W=["日","月","火","水","木","金","土"];
+  const list=events.filter(e=>e.yr===y&&e.mo===mo).map(e=>({e,evs:dayEvents(e)})).filter(x=>x.evs);
+  if(!list.length){a.innerHTML=`<div class="status">この月の予定はありません（表示チームを確認してください）</div>`;}
+  list.forEach(({e,evs})=>{
+    const dow=e.date.getDay(),dn=dow===0?"sun":dow===6?"sat":"";
+    const cls=["arow"];if(dow===0||dow===6)cls.push("wknd");if(isToday(e.date))cls.push("today");
+    const venue=e.venue?`<div class="avenue">📍 ${esc(e.venue)}</div>`:"";
+    const row=document.createElement("div");row.className=cls.join(" ");
+    row.innerHTML=`<div class="adate"><div class="n ${dn}">${e.day}</div><div class="w ${dn}">${W[dow]}</div></div><div class="abody">${venue}${evs}</div>`;
+    a.appendChild(row);
+  });
+
+  document.getElementById("gridView").classList.toggle("hidden",view!=="grid");
+  document.getElementById("agendaView").classList.toggle("hidden",view!=="agenda");
+}
+
+/* ---- events ---- */
+document.getElementById("viewToggle").addEventListener("click",e=>{
+  const b=e.target.closest("button");if(!b)return;
+  view=b.dataset.view;
+  document.querySelectorAll("#viewToggle button").forEach(x=>x.classList.toggle("on",x===b));
+  render();
+});
+document.getElementById("chips").addEventListener("click",e=>{
+  const b=e.target.closest(".chip");if(!b)return;const t=b.dataset.team;
+  if(active.has(t)){active.delete(t);b.classList.remove("on");}else{active.add(t);b.classList.add("on");}
+  render();
+});
+document.getElementById("prevM").addEventListener("click",()=>{if(mIdx>0){mIdx--;render();}});
+document.getElementById("nextM").addEventListener("click",()=>{if(mIdx<months.length-1){mIdx++;render();}});
+
+function showStatus(msg,isErr){const s=document.getElementById("status");s.textContent=msg;s.className="status"+(isErr?" err":"");s.classList.remove("hidden");}
+function hideStatus(){document.getElementById("status").classList.add("hidden");}
+function boot(text,isSample){
+  events=buildEvents(parseCSV(text));
+  if(!events.length){showStatus("予定を読み取れませんでした。シートの列構成をご確認ください。",true);return;}
+  computeMonths();hideStatus();
+  document.querySelectorAll("#viewToggle button").forEach(x=>x.classList.toggle("on",x.dataset.view===view));
+  render();
+  document.getElementById("refreshed").textContent="最終読込：" + new Date().toLocaleString("ja-JP");
+  if(isSample){
+    const n=document.getElementById("setupNote");n.classList.remove("hidden");
+    n.innerHTML=`<b>これはサンプル表示です。</b> スクリプト内の <code>CSV_URL</code> にスプレッドシートの「ウェブに公開」CSV URL を貼ると、実データが自動で表示されます。`;
+  }
+}
+
+async function load(){
+  if(!CSV_URL||CSV_URL==="PASTE_PUBLISHED_CSV_URL_HERE"){boot(SAMPLE,true);return;}
+  try{
+    const res=await fetch(CSV_URL,{cache:"no-store"});
+    if(!res.ok) throw new Error(res.status);
+    boot(await res.text(),false);
+  }catch(err){
+    showStatus("スプレッドシートを読み込めませんでした。公開設定と URL をご確認ください。",true);
+  }
+}
+load();
+</script>
+</body>
+</html>

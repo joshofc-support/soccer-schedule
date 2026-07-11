@@ -1,0 +1,104 @@
+# サッカー部スケジュール — 公開カレンダー 運用手順
+
+保護者向けにスプレッドシート連動のカレンダーをGitHub Pagesで公開するための手順書です。
+
+---
+
+## 全体の仕組み
+
+```
+Googleスプレッドシート（予定を編集）
+        │  ← ウェブに公開(CSV)
+        ▼
+   index.html（このカレンダー）
+        │  ← GitHub Pages で公開
+        ▼
+   保護者がURLで閲覧
+```
+
+- **予定の変更**：スプレッドシートを編集するだけ。サイトに自動反映（デプロイ不要）
+- **見た目・機能の変更**：Claude Codeでindex.htmlを直し、pushすると自動で再公開
+
+---
+
+## STEP 1. スプレッドシートを「ウェブに公開」
+
+1. スプレッドシートを開く
+2. `ファイル` → `共有` → `ウェブに公開`
+3. 「リンク」タブ → 対象シートを選択 → 形式を **カンマ区切り(.csv)** に
+4. `公開` → 表示されたURLをコピー（`.../pub?...output=csv` の形）
+
+> このCSV URLが、カレンダーの自動更新の入り口です。
+
+---
+
+## STEP 2. index.html にURLを設定
+
+`index.html` の先頭付近、ここを書き換えます：
+
+```js
+const CSV_URL = "PASTE_PUBLISHED_CSV_URL_HERE";  // ← STEP1のURLに置換
+const YEAR = 2026;                               // 予定の年
+```
+
+Claude Codeにこう頼めばOK：
+> 「index.html の CSV_URL を、このURLに置き換えて： （STEP1のURL）」
+
+---
+
+## STEP 3. Claude Code のインストール（初回のみ）
+
+ネイティブインストーラー推奨（Node.js不要）。ターミナルで：
+
+- **Mac / Linux**
+  ```bash
+  curl -fsSL https://claude.ai/install.sh | bash
+  ```
+- **Windows（PowerShell）**
+  ```powershell
+  irm https://claude.ai/install.ps1 | iex
+  ```
+
+インストール後：
+```bash
+claude          # 初回はブラウザでログイン（要 Claude 有料プラン）
+claude doctor   # 環境チェック（困ったら最初にこれ）
+```
+
+※ GitHub操作を任せるなら GitHub CLI（`gh`）も入れておくとスムーズです。
+
+---
+
+## STEP 4. GitHub Pages で公開（Claude Codeに依頼）
+
+このフォルダ（index.html がある場所）でClaude Codeを起動し、こう頼みます：
+
+> 「このフォルダをGitリポジトリにして、GitHubに `soccer-schedule` という名前で
+> 新規リポジトリを作成してpushして。そのあとGitHub Pagesを有効化して
+> （mainブランチ / ルート）、公開URLを教えて。」
+
+完了すると、次のようなURLが発行されます：
+```
+https://<あなたのGitHubユーザー名>.github.io/soccer-schedule/
+```
+このURLを保護者に共有すれば、誰でも閲覧できます。
+
+---
+
+## STEP 5. 以降の更新
+
+| やりたいこと | 操作 | 再デプロイ |
+|---|---|---|
+| 予定を変える | スプレッドシートを編集 | 不要（自動反映・最大5分） |
+| 色/レイアウト/機能を変える | Claude Codeに依頼 → push | 自動（Pagesが再公開） |
+
+例：見た目を変えたいとき
+> 「index.html のBチームの色をもう少し濃くして、変更をpushして」
+
+---
+
+## 補足・注意
+
+- 公開CSVは「そのシートの中身が誰でも読める」状態になります。氏名など見せたくない情報は列に入れないでください。
+- スプレッドシートの列構成（日にち / 曜日 / 施設 / A時間 / A内容 / B時間 / B内容 / 新入生時間 / 新入生内容）は変えないでください。読み取りが崩れます。
+- 年をまたぐ予定になったら `YEAR` を調整します。

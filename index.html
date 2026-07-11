@@ -8,7 +8,6 @@
   :root{
     --bg:#eef2ee; --panel:#fff; --ink:#16241d; --muted:#6b7b72; --line:#dbe3dd;
     --pitch:#12734a; --wknd:#f6f4ee;
-    --A:#1d4ed8; --A-bg:#e8eefc; --B:#d1490b; --B-bg:#fceee5; --N:#7c3aed; --N-bg:#f1eafd;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);
@@ -33,14 +32,15 @@
   .monthnav button:disabled{opacity:.3;cursor:default}
   .monthlabel{font-size:17px;font-weight:800;min-width:96px;text-align:center}
 
+  /* refresh button */
+  .refresh{display:inline-flex;align-items:center;gap:5px;border:1.5px solid var(--line);background:var(--panel);border-radius:999px;padding:8px 14px;font-size:13px;font-weight:800;color:var(--pitch);cursor:pointer}
+  .refresh:disabled{opacity:.5;cursor:default}
+
   /* team filters */
   .chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:16px}
   .chip{border:1.5px solid var(--line);background:var(--panel);border-radius:999px;padding:6px 13px;font-size:13px;font-weight:700;cursor:pointer;color:var(--muted);display:inline-flex;align-items:center;gap:6px}
-  .chip .dot{width:9px;height:9px;border-radius:50%}
-  .chip[data-team="A"] .dot{background:var(--A)}.chip[data-team="B"] .dot{background:var(--B)}.chip[data-team="N"] .dot{background:var(--N)}
-  .chip[data-team="A"].on{background:var(--A-bg);border-color:var(--A);color:var(--A)}
-  .chip[data-team="B"].on{background:var(--B-bg);border-color:var(--B);color:var(--B)}
-  .chip[data-team="N"].on{background:var(--N-bg);border-color:var(--N);color:var(--N)}
+  .chip .dot{width:9px;height:9px;border-radius:50%;background:var(--tc)}
+  .chip.on{background:var(--tbg);border-color:var(--tc);color:var(--tc)}
 
   /* status banners */
   .note{background:#fff6e0;border:1px solid #f0d98a;color:#6b5410;border-radius:10px;padding:11px 13px;font-size:13px;line-height:1.55;margin-bottom:14px}
@@ -66,9 +66,7 @@
   .ev{border-radius:7px;padding:4px 6px;font-size:12px;line-height:1.3;border-left:3px solid}
   .ev .t{font-weight:800;font-variant-numeric:tabular-nums;display:block;font-size:11px;opacity:.9}
   .ev .c{display:block}
-  .ev.A{background:var(--A-bg);border-color:var(--A);color:#132a63}
-  .ev.B{background:var(--B-bg);border-color:var(--B);color:#6b2606}
-  .ev.N{background:var(--N-bg);border-color:var(--N);color:#3f1a75}
+  .ev{background:var(--tbg);border-color:var(--tc);color:var(--tink)}
   .ev .badge{font-size:9px;font-weight:800;opacity:.7;margin-right:3px}
   .rest{color:#b9c2bb;font-size:11px;font-weight:700}
 
@@ -135,13 +133,10 @@
       <div class="monthlabel" id="monthLabel">—</div>
       <button id="nextM" aria-label="次の月">›</button>
     </div>
+    <button id="refreshBtn" class="refresh" aria-label="最新の予定に更新">⟳ 更新</button>
   </div>
 
-  <div class="chips" id="chips">
-    <button class="chip on" data-team="A"><span class="dot"></span>Aチーム</button>
-    <button class="chip on" data-team="B"><span class="dot"></span>Bチーム</button>
-    <button class="chip on" data-team="N"><span class="dot"></span>新入生</button>
-  </div>
+  <div class="chips" id="chips"></div>
 
   <div id="status" class="status">読み込み中…</div>
 
@@ -178,12 +173,23 @@ const CSV_URL = "https://docs.google.com/spreadsheets/d/1S2VVPDtuKOMLYpWn2GUJ-IA
 const YEAR = 2026;            // 予定の年（年をまたぐ場合のみ調整）
 /* ============================================================ */
 
-const TEAMS=["A","B","N"], LABEL={A:"A",B:"B",N:"新"};
-const active=new Set(TEAMS);
-let events=[];          // {date:Date, ymKey, day, venue, A:[t,c], B:.., N:..}
+/* チーム列はシートの見出し行から自動検出。色は下のパレットから自動割当。
+   A→青 / B→橙 / 新入生→紫 を優先し、それ以外のチームは4番目以降を順に使う */
+const PALETTE=[
+  {c:"#1d4ed8",bg:"#e8eefc",ink:"#132a63"},
+  {c:"#d1490b",bg:"#fceee5",ink:"#6b2606"},
+  {c:"#7c3aed",bg:"#f1eafd",ink:"#3f1a75"},
+  {c:"#0f766e",bg:"#e0f4f1",ink:"#0b3f3b"},
+  {c:"#be185d",bg:"#fdeaf3",ink:"#5e0b2e"},
+  {c:"#a16207",bg:"#f7efd9",ink:"#4d2f04"}
+];
+let teams=[];           // {key, name, label, color, timeCol, contentCol}
+let active=new Set();   // 表示中チームのkey
+let events=[];          // {date, ymKey, yr, mo, day, venue, items:{key:[時間,内容]}}
 let months=[];          // ["2026-7", ...]
 let mIdx=0;
 let view = "grid";
+let lastLoad=0;
 
 /* ---- サンプル（URL未設定時のプレビュー用） ---- */
 const SAMPLE=`,,,Aチーム,,Bチーム,,新入生,
@@ -207,22 +213,76 @@ function parseCSV(text){
   return rows;
 }
 
-function buildEvents(rows){
+/* ---- 見出し行から列構成を自動検出 ----
+   ・「日にち」（または「日付」）を含む行をヘッダーとみなす
+   ・その1つ上の行はチーム名のグループ行として扱う（2段ヘッダー対応）
+   ・「◯◯ 時間」の列ごとにチームを作り、直後の「内容」列とペアにする
+   → 列の並び替え・列の追加・チームの増減に自動で追従する */
+const DATE_RE=/日にち|日付/, VENUE_RE=/施設|場所|会場/, TIME_RE=/時間/, CONT_RE=/内容/;
+function detectLayout(rows){
+  let hIdx=-1;
+  for(let i=0;i<Math.min(rows.length,10);i++){
+    if(rows[i].some(c=>DATE_RE.test((c||"").trim()))){hIdx=i;break;}
+  }
+  if(hIdx<0) return null;
+  const h=rows[hIdx].map(c=>(c||"").trim());
+  let fill=[];                       // グループ行（1つ上）を前方埋め
+  if(hIdx>0){let cur="";fill=rows[hIdx-1].map(c=>{const v=(c||"").trim();if(v)cur=v;return cur;});}
+  const eff=h.map((c,i)=>(((fill[i]||"")+" "+c).trim()));   // 実効見出し（例:「Aチーム 時間」）
+  const findCol=re=>eff.findIndex(c=>re.test(c));
+  const dateCol=findCol(DATE_RE), venueCol=findCol(VENUE_RE);
+  const tlist=[];
+  for(let i=0;i<eff.length;i++){
+    if(!TIME_RE.test(eff[i])) continue;
+    const name=eff[i].replace(TIME_RE,"").trim()||`チーム${tlist.length+1}`;
+    let cc=-1;
+    for(let j=i+1;j<eff.length&&j<=i+2;j++){if(CONT_RE.test(eff[j])){cc=j;break;}}
+    if(cc<0)cc=i+1;
+    tlist.push({name,timeCol:i,contentCol:cc});
+  }
+  if(dateCol<0||!tlist.length) return null;
+  return {headerIdx:hIdx,dateCol,venueCol,teams:tlist};
+}
+
+function teamLabel(name){
+  if(/新入生/.test(name))return "新";
+  const m=name.match(/[A-Za-zＡ-Ｚａ-ｚ0-9０-９]/);
+  return m?m[0]:(name.slice(0,1)||"?");
+}
+
+function buildEvents(rows,layout){
   const out=[];
-  for(const r of rows){
-    const raw=(r[0]||"").trim().split(" ")[0];   // 時刻部分があれば除去
+  for(let ri=layout.headerIdx+1;ri<rows.length;ri++){
+    const r=rows[ri];
+    const raw=(r[layout.dateCol]||"").trim().split(" ")[0];   // 時刻部分があれば除去
     let yr=YEAR,mo,da,m;
     if(m=raw.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/)){yr=+m[1];mo=+m[2];da=+m[3];}      // Y/M/D, Y-M-D
     else if(m=raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)){mo=+m[1];da=+m[2];yr=+m[3];}     // M/D/Y
     else if(m=raw.match(/^(\d{1,2})\/(\d{1,2})$/)){mo=+m[1];da=+m[2];}                        // M/D
-    else continue;                                                                            // ヘッダ行や空行はスキップ
+    else continue;                                                                            // 空行などはスキップ
     const date=new Date(yr,mo-1,da);
-    const cell=(i)=>((r[i]||"").trim());
-    const pair=(ti,ci)=>{const t=cell(ti),c=cell(ci);return (t||c)?[t,c]:null;};
-    out.push({date,ymKey:`${yr}-${mo}`,yr,mo,day:da,venue:cell(2),
-      A:pair(3,4),B:pair(5,6),N:pair(7,8)});
+    const items={};
+    for(const t of teams){
+      const tv=(r[t.timeCol]||"").trim(), cv=(r[t.contentCol]||"").trim();
+      if(tv||cv)items[t.key]=[tv,cv];
+    }
+    out.push({date,ymKey:`${yr}-${mo}`,yr,mo,day:da,
+      venue:layout.venueCol>=0?(r[layout.venueCol]||"").trim():"",items});
   }
   return out;
+}
+
+function renderChips(){
+  const box=document.getElementById("chips");box.innerHTML="";
+  teams.forEach(t=>{
+    const b=document.createElement("button");
+    b.className="chip"+(active.has(t.key)?" on":"");
+    b.dataset.team=t.key;
+    b.style.setProperty("--tc",t.color.c);
+    b.style.setProperty("--tbg",t.color.bg);
+    b.innerHTML=`<span class="dot"></span>${esc(t.name)}`;
+    box.appendChild(b);
+  });
 }
 
 function computeMonths(){
@@ -235,15 +295,15 @@ function computeMonths(){
   if(months.indexOf(nowKey)<0) mIdx=0;
 }
 
-function evHTML(team,arr){
+function evHTML(t,arr){
   if(!arr) return "";
-  const [t,c]=arr;
-  const time=t?`<span class="t">${esc(t)}</span>`:"";
-  const body=c?`<span class="c">${esc(c)}</span>`:(t?`<span class="c">練習</span>`:"");
-  return `<div class="ev ${team}"><span class="badge">${LABEL[team]}</span>${time}${body}</div>`;
+  const [tm,c]=arr;
+  const time=tm?`<span class="t">${esc(tm)}</span>`:"";
+  const body=c?`<span class="c">${esc(c)}</span>`:(tm?`<span class="c">練習</span>`:"");
+  return `<div class="ev" style="--tc:${t.color.c};--tbg:${t.color.bg};--tink:${t.color.ink}"><span class="badge">${esc(t.label)}</span>${time}${body}</div>`;
 }
 function esc(s){return s.replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));}
-function dayEvents(rec){return TEAMS.filter(t=>active.has(t)&&rec[t]).map(t=>evHTML(t,rec[t])).join("");}
+function dayEvents(rec){return teams.filter(t=>active.has(t.key)&&rec.items[t.key]).map(t=>evHTML(t,rec.items[t.key])).join("");}
 function isToday(date){const n=new Date();return n.getFullYear()===date.getFullYear()&&n.getMonth()===date.getMonth()&&n.getDate()===date.getDate();}
 
 function render(){
@@ -295,7 +355,7 @@ function openDay(rec){
   const dow=rec.date.getDay(),dn=dow===0?"sun":dow===6?"sat":"";
   document.getElementById("modalDate").innerHTML=`${rec.mo}月${rec.day}日 <span class="w ${dn}">(${WDAYS[dow]})</span>`;
   const venue=rec.venue?`<div class="modal-venue">📍 ${esc(rec.venue)}</div>`:"";
-  const evs=TEAMS.filter(t=>rec[t]).map(t=>evHTML(t,rec[t])).join("");
+  const evs=teams.filter(t=>rec.items[t.key]).map(t=>evHTML(t,rec.items[t.key])).join("");
   document.getElementById("modalBody").innerHTML=venue+(evs||`<div class="modal-none">この日の予定はありません</div>`);
   document.getElementById("dayModal").classList.remove("hidden");
 }
@@ -322,11 +382,31 @@ document.getElementById("nextM").addEventListener("click",()=>{if(mIdx<months.le
 function showStatus(msg,isErr){const s=document.getElementById("status");s.textContent=msg;s.className="status"+(isErr?" err":"");s.classList.remove("hidden");}
 function hideStatus(){document.getElementById("status").classList.add("hidden");}
 function boot(text,isSample){
-  events=buildEvents(parseCSV(text));
-  if(!events.length){showStatus("予定を読み取れませんでした。シートの列構成をご確認ください。",true);return;}
-  computeMonths();hideStatus();
+  const rows=parseCSV(text);
+  const layout=detectLayout(rows);
+  if(!layout){showStatus("シートの見出し（「日にち」と各チームの「時間」「内容」）を見つけられませんでした。見出し行をご確認ください。",true);return;}
+
+  // チームを見出しから再構築（再読込時、非表示にしていたチームは名前で引き継ぐ）
+  const offNames=new Set(teams.filter(t=>!active.has(t.key)).map(t=>t.name));
+  let extra=3;
+  teams=layout.teams.map((t,i)=>{
+    const label=teamLabel(t.name);
+    const fixed={A:0,B:1,"新":2}[label];
+    const color=PALETTE[(fixed!==undefined?fixed:extra++)%PALETTE.length];
+    return {key:"t"+i,name:t.name,label,color,timeCol:t.timeCol,contentCol:t.contentCol};
+  });
+  active=new Set(teams.filter(t=>!offNames.has(t.name)).map(t=>t.key));
+  renderChips();
+
+  events=buildEvents(rows,layout);
+  if(!events.length){showStatus("予定を読み取れませんでした。シートの内容をご確認ください。",true);return;}
+  const prevKey=months[mIdx];                 // 再読込時は表示中の月を維持
+  computeMonths();
+  if(prevKey){const k=months.indexOf(prevKey);if(k>=0)mIdx=k;}
+  hideStatus();
   document.querySelectorAll("#viewToggle button").forEach(x=>x.classList.toggle("on",x.dataset.view===view));
   render();
+  lastLoad=Date.now();
   document.getElementById("refreshed").textContent="最終読込：" + new Date().toLocaleString("ja-JP");
   if(isSample){
     const n=document.getElementById("setupNote");n.classList.remove("hidden");
@@ -344,6 +424,18 @@ async function load(){
     showStatus("スプレッドシートを読み込めませんでした。公開設定と URL をご確認ください。",true);
   }
 }
+
+/* 更新ボタン：開いたまま最新のシート内容を再読込 */
+const refreshBtn=document.getElementById("refreshBtn");
+refreshBtn.addEventListener("click",async()=>{
+  refreshBtn.disabled=true;
+  const orig=refreshBtn.textContent;refreshBtn.textContent="更新中…";
+  try{await load();}finally{refreshBtn.disabled=false;refreshBtn.textContent=orig;}
+});
+/* タブに戻ってきたとき、5分以上経っていたら自動再読込 */
+document.addEventListener("visibilitychange",()=>{
+  if(!document.hidden&&lastLoad&&Date.now()-lastLoad>5*60*1000)load();
+});
 load();
 </script>
 </body>

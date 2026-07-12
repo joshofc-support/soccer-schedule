@@ -214,6 +214,24 @@ function parseCSV(text){
   return rows;
 }
 
+/* ---- gviz JSON → 行列 ----
+   セルの「実データ」を使う。日付セルは表示が "6/1" でも実体の年込みで
+   "2026/6/1" に変換する（＝シートの日付データが正） */
+function gvizRows(text){
+  const m=text.match(/setResponse\(([\s\S]*)\);?\s*$/);
+  if(!m) throw new Error("unexpected gviz response");
+  const t=JSON.parse(m[1]).table;
+  const val=c=>{
+    if(!c||c.v==null)return (c&&c.f!=null)?String(c.f):"";
+    if(typeof c.v==="string"){
+      const d=c.v.match(/^Date\((\d+),(\d+),(\d+)/);
+      return d?`${d[1]}/${+d[2]+1}/${d[3]}`:c.v;   // gvizの月は0始まり
+    }
+    return c.f!=null?String(c.f):String(c.v);
+  };
+  return [t.cols.map(c=>c.label||""), ...t.rows.map(r=>(r.c||[]).map(val))];
+}
+
 /* ---- 見出し行から列構成を自動検出 ----
    ・「日にち」（または「日付」）を含む行をヘッダーとみなす
    ・その1つ上の行はチーム名のグループ行として扱う（2段ヘッダー対応）
@@ -388,8 +406,7 @@ function boot(texts,isSample){
   // 各シートごとに見出しを検出し、同名チームはシートをまたいで統合する
   const keyByName=new Map();
   const parsed=[];
-  for(const {text,name} of texts){
-    const rows=parseCSV(text);
+  for(const {rows,name} of texts){
     const layout=detectLayout(rows);
     if(!layout)continue;   // 見出しが読めないシート（メモ用など）はスキップ
     const local=layout.teams.map(t=>{
@@ -438,7 +455,7 @@ async function fetchText(url){
 }
 
 async function load(){
-  if(!SHEET_ID&&(!CSV_URL||CSV_URL==="PASTE_PUBLISHED_CSV_URL_HERE")){boot([{text:SAMPLE,name:""}],true);return;}
+  if(!SHEET_ID&&(!CSV_URL||CSV_URL==="PASTE_PUBLISHED_CSV_URL_HERE")){boot([{rows:parseCSV(SAMPLE),name:""}],true);return;}
   try{
     let texts=[];
     try{
@@ -447,11 +464,15 @@ async function load(){
       const sheets=[...html.matchAll(/\{name: ?"((?:[^"\\]|\\.)*)", ?pageUrl:[^}]*?gid=(\d+)/g)].map(m=>({name:m[1],gid:m[2]}));
       if(!sheets.length) throw new Error("no sheets found");
       const got=await Promise.allSettled(sheets.map(s=>fetchText(
-        `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${s.gid}`)));
-      texts=got.map((x,i)=>x.status==="fulfilled"?{text:x.value,name:sheets[i].name}:null).filter(Boolean);
+        `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${s.gid}`)));
+      texts=[];
+      got.forEach((x,i)=>{
+        if(x.status!=="fulfilled")return;
+        try{texts.push({rows:gvizRows(x.value),name:sheets[i].name});}catch(e){}  // 読めないシートはスキップ
+      });
       if(!texts.length) throw new Error("all sheets failed");
     }catch(e){
-      texts=[{text:await fetchText(CSV_URL),name:""}];   // 予備：従来どおり単一シートだけ読む
+      texts=[{rows:parseCSV(await fetchText(CSV_URL)),name:""}];   // 予備：従来どおり単一シートだけ読む
     }
     boot(texts,false);
   }catch(err){

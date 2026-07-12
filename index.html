@@ -165,12 +165,13 @@
 
 <script>
 /* ============================================================
-   設定：ここにスプレッドシートの「ウェブに公開」CSV URL を貼る
-   File → 共有 → ウェブに公開 → 対象シート → 形式=カンマ区切り(.csv) → 公開
-   例: https://docs.google.com/spreadsheets/d/e/2PACX-XXXX/pub?output=csv
+   設定：スプレッドシートのID（URLの /d/ と /edit の間の文字列）
+   全シート（月ごとのタブ）を自動で見つけて読み込みます。
+   シートの追加・列の移動にも自動対応します。
    ============================================================ */
-const CSV_URL = "https://docs.google.com/spreadsheets/d/1S2VVPDtuKOMLYpWn2GUJ-IAZdnAioH02X8tE3RmQUy4/gviz/tq?tqx=out:csv&gid=610564075";
-const YEAR = 2026;            // 予定の年（年をまたぐ場合のみ調整）
+const SHEET_ID = "1S2VVPDtuKOMLYpWn2GUJ-IAZdnAioH02X8tE3RmQUy4";
+const CSV_URL  = "https://docs.google.com/spreadsheets/d/1S2VVPDtuKOMLYpWn2GUJ-IAZdnAioH02X8tE3RmQUy4/gviz/tq?tqx=out:csv&gid=610564075"; // 予備（全シート取得に失敗した場合のみ使用）
+const YEAR = 2026;            // 年度（4月〜翌3月。M/D表記の1〜3月は自動的に翌年扱い）
 /* ============================================================ */
 
 /* チーム列はシートの見出し行から自動検出。色は下のパレットから自動割当。
@@ -250,19 +251,19 @@ function teamLabel(name){
   return m?m[0]:(name.slice(0,1)||"?");
 }
 
-function buildEvents(rows,layout){
+function buildEvents(rows,layout,localTeams){
   const out=[];
   for(let ri=layout.headerIdx+1;ri<rows.length;ri++){
     const r=rows[ri];
     const raw=(r[layout.dateCol]||"").trim().split(" ")[0];   // 時刻部分があれば除去
-    let yr=YEAR,mo,da,m;
+    let yr,mo,da,m;
     if(m=raw.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/)){yr=+m[1];mo=+m[2];da=+m[3];}      // Y/M/D, Y-M-D
     else if(m=raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)){mo=+m[1];da=+m[2];yr=+m[3];}     // M/D/Y
-    else if(m=raw.match(/^(\d{1,2})\/(\d{1,2})$/)){mo=+m[1];da=+m[2];}                        // M/D
+    else if(m=raw.match(/^(\d{1,2})\/(\d{1,2})$/)){mo=+m[1];da=+m[2];yr=mo>=4?YEAR:YEAR+1;}  // M/D（年度で年を補完：1〜3月は翌年）
     else continue;                                                                            // 空行などはスキップ
     const date=new Date(yr,mo-1,da);
     const items={};
-    for(const t of teams){
+    for(const t of localTeams){
       const tv=(r[t.timeCol]||"").trim(), cv=(r[t.contentCol]||"").trim();
       if(tv||cv)items[t.key]=[tv,cv];
     }
@@ -287,7 +288,7 @@ function renderChips(){
 
 function computeMonths(){
   const set=[...new Set(events.map(e=>e.ymKey))];
-  set.sort((a,b)=>{const[,ma]=a.split("-"),[,mb]=b.split("-");return (+ma)-(+mb);});
+  set.sort((a,b)=>{const[ya,ma]=a.split("-").map(Number),[yb,mb]=b.split("-").map(Number);return ya-yb||ma-mb;});
   months=set;
   const now=new Date();
   const nowKey=`${now.getFullYear()}-${now.getMonth()+1}`;
@@ -331,19 +332,18 @@ function render(){
     grid.appendChild(cell);
   }
 
-  // agenda（予定のある日だけ）
+  // agenda（月の全日を表示。予定のない日は白紙の行）
   const a=document.getElementById("agendaView");a.innerHTML="";
-  const W=["日","月","火","水","木","金","土"];
-  const list=events.filter(e=>e.yr===y&&e.mo===mo).map(e=>({e,evs:dayEvents(e)})).filter(x=>x.evs);
-  if(!list.length){a.innerHTML=`<div class="status">この月の予定はありません（表示チームを確認してください）</div>`;}
-  list.forEach(({e,evs})=>{
-    const dow=e.date.getDay(),dn=dow===0?"sun":dow===6?"sat":"";
-    const cls=["arow"];if(dow===0||dow===6)cls.push("wknd");if(isToday(e.date))cls.push("today");
-    const venue=e.venue?`<div class="avenue">📍 ${esc(e.venue)}</div>`:"";
+  for(let d=1;d<=days;d++){
+    const date=new Date(y,mo-1,d),dow=date.getDay(),rec=byDay[d];
+    const dn=dow===0?"sun":dow===6?"sat":"";
+    const cls=["arow"];if(dow===0||dow===6)cls.push("wknd");if(isToday(date))cls.push("today");
+    const evs=rec?dayEvents(rec):"";
+    const venue=(rec&&rec.venue)?`<div class="avenue">📍 ${esc(rec.venue)}</div>`:"";
     const row=document.createElement("div");row.className=cls.join(" ");
-    row.innerHTML=`<div class="adate"><div class="n ${dn}">${e.day}</div><div class="w ${dn}">${W[dow]}</div></div><div class="abody">${venue}${evs}</div>`;
+    row.innerHTML=`<div class="adate"><div class="n ${dn}">${d}</div><div class="w ${dn}">${WDAYS[dow]}</div></div><div class="abody">${venue}${evs}</div>`;
     a.appendChild(row);
-  });
+  }
 
   document.getElementById("gridView").classList.toggle("hidden",view!=="grid");
   document.getElementById("agendaView").classList.toggle("hidden",view!=="agenda");
@@ -381,24 +381,35 @@ document.getElementById("nextM").addEventListener("click",()=>{if(mIdx<months.le
 
 function showStatus(msg,isErr){const s=document.getElementById("status");s.textContent=msg;s.className="status"+(isErr?" err":"");s.classList.remove("hidden");}
 function hideStatus(){document.getElementById("status").classList.add("hidden");}
-function boot(text,isSample){
-  const rows=parseCSV(text);
-  const layout=detectLayout(rows);
-  if(!layout){showStatus("シートの見出し（「日にち」と各チームの「時間」「内容」）を見つけられませんでした。見出し行をご確認ください。",true);return;}
+function boot(texts,isSample){
+  // 各シートごとに見出しを検出し、同名チームはシートをまたいで統合する
+  const keyByName=new Map();
+  const parsed=[];
+  for(const text of texts){
+    const rows=parseCSV(text);
+    const layout=detectLayout(rows);
+    if(!layout)continue;   // 見出しが読めないシート（メモ用など）はスキップ
+    const local=layout.teams.map(t=>{
+      if(!keyByName.has(t.name))keyByName.set(t.name,"t"+keyByName.size);
+      return {key:keyByName.get(t.name),timeCol:t.timeCol,contentCol:t.contentCol};
+    });
+    parsed.push({rows,layout,local});
+  }
+  if(!parsed.length){showStatus("シートの見出し（「日にち」と各チームの「時間」「内容」）を見つけられませんでした。見出し行をご確認ください。",true);return;}
 
   // チームを見出しから再構築（再読込時、非表示にしていたチームは名前で引き継ぐ）
   const offNames=new Set(teams.filter(t=>!active.has(t.key)).map(t=>t.name));
   let extra=3;
-  teams=layout.teams.map((t,i)=>{
-    const label=teamLabel(t.name);
+  teams=[...keyByName.entries()].map(([name,key])=>{
+    const label=teamLabel(name);
     const fixed={A:0,B:1,"新":2}[label];
     const color=PALETTE[(fixed!==undefined?fixed:extra++)%PALETTE.length];
-    return {key:"t"+i,name:t.name,label,color,timeCol:t.timeCol,contentCol:t.contentCol};
+    return {key,name,label,color};
   });
   active=new Set(teams.filter(t=>!offNames.has(t.name)).map(t=>t.key));
   renderChips();
 
-  events=buildEvents(rows,layout);
+  events=parsed.flatMap(p=>buildEvents(p.rows,p.layout,p.local));
   if(!events.length){showStatus("予定を読み取れませんでした。シートの内容をご確認ください。",true);return;}
   const prevKey=months[mIdx];                 // 再読込時は表示中の月を維持
   computeMonths();
@@ -414,14 +425,31 @@ function boot(text,isSample){
   }
 }
 
+async function fetchText(url){
+  const opt={cache:"no-store"};
+  if(typeof AbortSignal!=="undefined"&&AbortSignal.timeout)opt.signal=AbortSignal.timeout(15000);
+  const res=await fetch(url,opt);
+  if(!res.ok) throw new Error(res.status);
+  return res.text();
+}
+
 async function load(){
-  if(!CSV_URL||CSV_URL==="PASTE_PUBLISHED_CSV_URL_HERE"){boot(SAMPLE,true);return;}
+  if(!SHEET_ID&&(!CSV_URL||CSV_URL==="PASTE_PUBLISHED_CSV_URL_HERE")){boot([SAMPLE],true);return;}
   try{
-    const opt={cache:"no-store"};
-    if(typeof AbortSignal!=="undefined"&&AbortSignal.timeout)opt.signal=AbortSignal.timeout(15000);
-    const res=await fetch(CSV_URL,opt);
-    if(!res.ok) throw new Error(res.status);
-    boot(await res.text(),false);
+    let texts=[];
+    try{
+      // 全シート（月ごとのタブ）を自動発見：htmlview からシートの gid 一覧を抽出
+      const html=await fetchText(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/htmlview`);
+      const gids=[...html.matchAll(/\{name: ?"(?:[^"\\]|\\.)*", ?pageUrl:[^}]*?gid=(\d+)/g)].map(m=>m[1]);
+      if(!gids.length) throw new Error("no sheets found");
+      const got=await Promise.allSettled(gids.map(gid=>fetchText(
+        `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${gid}`)));
+      texts=got.filter(x=>x.status==="fulfilled").map(x=>x.value);
+      if(!texts.length) throw new Error("all sheets failed");
+    }catch(e){
+      texts=[await fetchText(CSV_URL)];   // 予備：従来どおり単一シートだけ読む
+    }
+    boot(texts,false);
   }catch(err){
     showStatus("スプレッドシートを読み込めませんでした。「⟳ 更新」で再試行するか、公開設定と URL をご確認ください。",true);
   }

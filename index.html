@@ -251,7 +251,7 @@ function teamLabel(name){
   return m?m[0]:(name.slice(0,1)||"?");
 }
 
-function buildEvents(rows,layout,localTeams){
+function buildEvents(rows,layout,localTeams,nameYear){
   const out=[];
   for(let ri=layout.headerIdx+1;ri<rows.length;ri++){
     const r=rows[ri];
@@ -259,7 +259,10 @@ function buildEvents(rows,layout,localTeams){
     let yr,mo,da,m;
     if(m=raw.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/)){yr=+m[1];mo=+m[2];da=+m[3];}      // Y/M/D, Y-M-D
     else if(m=raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)){mo=+m[1];da=+m[2];yr=+m[3];}     // M/D/Y
-    else if(m=raw.match(/^(\d{1,2})\/(\d{1,2})$/)){mo=+m[1];da=+m[2];yr=mo>=4?YEAR:YEAR+1;}  // M/D（年度で年を補完：1〜3月は翌年）
+    else if(m=raw.match(/^(\d{1,2})\/(\d{1,2})$/)){                                          // M/D
+      mo=+m[1];da=+m[2];
+      yr=nameYear!=null?nameYear:(mo>=4?YEAR:YEAR+1);  // シート名の年＞年度(YEAR)補完（1〜3月は翌年）
+    }
     else continue;                                                                            // 空行などはスキップ
     const date=new Date(yr,mo-1,da);
     const items={};
@@ -385,7 +388,7 @@ function boot(texts,isSample){
   // 各シートごとに見出しを検出し、同名チームはシートをまたいで統合する
   const keyByName=new Map();
   const parsed=[];
-  for(const text of texts){
+  for(const {text,name} of texts){
     const rows=parseCSV(text);
     const layout=detectLayout(rows);
     if(!layout)continue;   // 見出しが読めないシート（メモ用など）はスキップ
@@ -393,7 +396,8 @@ function boot(texts,isSample){
       if(!keyByName.has(t.name))keyByName.set(t.name,"t"+keyByName.size);
       return {key:keyByName.get(t.name),timeCol:t.timeCol,contentCol:t.contentCol};
     });
-    parsed.push({rows,layout,local});
+    const ym=(name||"").match(/(20\d\d)/);         // シート名の年（例:「2027年4月」）を優先
+    parsed.push({rows,layout,local,nameYear:ym?+ym[1]:null});
   }
   if(!parsed.length){showStatus("シートの見出し（「日にち」と各チームの「時間」「内容」）を見つけられませんでした。見出し行をご確認ください。",true);return;}
 
@@ -409,7 +413,7 @@ function boot(texts,isSample){
   active=new Set(teams.filter(t=>!offNames.has(t.name)).map(t=>t.key));
   renderChips();
 
-  events=parsed.flatMap(p=>buildEvents(p.rows,p.layout,p.local));
+  events=parsed.flatMap(p=>buildEvents(p.rows,p.layout,p.local,p.nameYear));
   if(!events.length){showStatus("予定を読み取れませんでした。シートの内容をご確認ください。",true);return;}
   const prevKey=months[mIdx];                 // 再読込時は表示中の月を維持
   computeMonths();
@@ -434,20 +438,20 @@ async function fetchText(url){
 }
 
 async function load(){
-  if(!SHEET_ID&&(!CSV_URL||CSV_URL==="PASTE_PUBLISHED_CSV_URL_HERE")){boot([SAMPLE],true);return;}
+  if(!SHEET_ID&&(!CSV_URL||CSV_URL==="PASTE_PUBLISHED_CSV_URL_HERE")){boot([{text:SAMPLE,name:""}],true);return;}
   try{
     let texts=[];
     try{
-      // 全シート（月ごとのタブ）を自動発見：htmlview からシートの gid 一覧を抽出
+      // 全シート（月ごとのタブ）を自動発見：htmlview からシート名と gid の一覧を抽出
       const html=await fetchText(`https://docs.google.com/spreadsheets/d/${SHEET_ID}/htmlview`);
-      const gids=[...html.matchAll(/\{name: ?"(?:[^"\\]|\\.)*", ?pageUrl:[^}]*?gid=(\d+)/g)].map(m=>m[1]);
-      if(!gids.length) throw new Error("no sheets found");
-      const got=await Promise.allSettled(gids.map(gid=>fetchText(
-        `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${gid}`)));
-      texts=got.filter(x=>x.status==="fulfilled").map(x=>x.value);
+      const sheets=[...html.matchAll(/\{name: ?"((?:[^"\\]|\\.)*)", ?pageUrl:[^}]*?gid=(\d+)/g)].map(m=>({name:m[1],gid:m[2]}));
+      if(!sheets.length) throw new Error("no sheets found");
+      const got=await Promise.allSettled(sheets.map(s=>fetchText(
+        `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${s.gid}`)));
+      texts=got.map((x,i)=>x.status==="fulfilled"?{text:x.value,name:sheets[i].name}:null).filter(Boolean);
       if(!texts.length) throw new Error("all sheets failed");
     }catch(e){
-      texts=[await fetchText(CSV_URL)];   // 予備：従来どおり単一シートだけ読む
+      texts=[{text:await fetchText(CSV_URL),name:""}];   // 予備：従来どおり単一シートだけ読む
     }
     boot(texts,false);
   }catch(err){

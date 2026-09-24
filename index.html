@@ -189,9 +189,9 @@ const PALETTE=[
   {c:"#be185d",bg:"#fdeaf3",ink:"#5e0b2e"},
   {c:"#a16207",bg:"#f7efd9",ink:"#4d2f04"}
 ];
-let teams=[];           // {key, name, label, color, timeCol, contentCol}
+let teams=[];           // {key, name, label, color}
 let active=new Set();   // 表示中チームのkey
-let events=[];          // {date, ymKey, yr, mo, day, venue, items:{key:[時間,内容]}}
+let events=[];          // {date, ymKey, yr, mo, day, venue, items:{key:{t,f,c}}, off}
 let months=[];          // ["2026-7", ...]
 let mIdx=0;
 let view = "grid";
@@ -239,10 +239,11 @@ function gvizRows(text){
 }
 
 /* ---- 見出し行から列構成を自動検出 ----
-   ・「日にち」（または「日付」）を含む行をヘッダーとみなす
-   ・その1つ上の行はチーム名のグループ行として扱う（2段ヘッダー対応）
-   ・「◯◯ 時間」の列ごとにチームを作り、直後の「内容」列とペアにする
-   → 列の並び替え・列の追加・チームの増減に自動で追従する */
+   ・「日にち」（または「日付」）を含む行をヘッダーとみなす（1つ上のチーム名行も前方埋めで統合）
+   ・チーム名（Aチーム/新入生 等）が付いた列を区切りに、次の区切りまでを1チームのブロックとする
+   ・チーム名は「時間」列でも「施設」列でもよく、ブロック内の並びが
+     時間→施設→内容 / 施設→時間→内容 のどちらでも、また小見出しが一部空でも割り当てる
+   → 列の並び替え・列の追加・チームの増減・月ごとの表記ゆれに自動で追従する */
 const DATE_RE=/日にち|日付/, VENUE_RE=/施設|場所|会場/, TIME_RE=/時間/, CONT_RE=/内容/;
 /* セル内容の判定ルール */
 const HIDE_RE=/^[△▲]/;                                       // △▲で始まる＝非表示
@@ -315,9 +316,9 @@ function buildEvents(rows,layout,localTeams,nameYear){
     const date=new Date(yr,mo-1,da);
     const items={};
     for(const t of localTeams){const o=teamCell(r,t);if(o)items[t.key]=o;}
-    // 休み（OFF/オフ/「休」を含む）→ その日を休み表示（曜日・日付列は除外）
+    // 休み（OFF/オフ/「休」を含む）→ その日を休み表示（日付列のみ除外）
     let off=null;
-    for(let i=0;i<r.length;i++){if(i===layout.dateCol||i===1)continue;if(isOff(r[i])){off=(r[i]||"").trim();break;}}
+    for(let i=0;i<r.length;i++){if(i===layout.dateCol)continue;if(isOff(r[i])){off=(r[i]||"").trim();break;}}
     out.push({date,ymKey:`${yr}-${mo}`,yr,mo,day:da,
       venue:layout.venueCol>=0?(r[layout.venueCol]||"").trim():"",items,off});
   }
@@ -387,9 +388,9 @@ function render(){
   document.getElementById("nextM").disabled = mIdx>=months.length-1;
   const byDay={}; events.filter(e=>e.yr===y&&e.mo===mo).forEach(e=>byDay[e.day]=e);
 
-  // その月に実績のあるチームだけフィルタchipを出す
+  // その月に実績のあるチームだけフィルタchipを出す（当月分のbyDayから集計）
   const present=new Set();
-  events.forEach(e=>{if(e.yr===y&&e.mo===mo)Object.keys(e.items).forEach(k=>present.add(k));});
+  Object.values(byDay).forEach(e=>Object.keys(e.items).forEach(k=>present.add(k)));
   renderChips(present);
 
   // grid

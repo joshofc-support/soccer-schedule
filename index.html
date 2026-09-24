@@ -330,9 +330,10 @@ function teamCell(r,t){
   return {t:tm,f,c};
 }
 
-function renderChips(){
+function renderChips(present){
   const box=document.getElementById("chips");box.innerHTML="";
   teams.forEach(t=>{
+    if(present&&!present.has(t.key))return;   // その月に実績のないチームは出さない
     const b=document.createElement("button");
     b.className="chip"+(active.has(t.key)?" on":"");
     b.dataset.team=t.key;
@@ -373,6 +374,11 @@ function render(){
   document.getElementById("prevM").disabled = mIdx<=0;
   document.getElementById("nextM").disabled = mIdx>=months.length-1;
   const byDay={}; events.filter(e=>e.yr===y&&e.mo===mo).forEach(e=>byDay[e.day]=e);
+
+  // その月に実績のあるチームだけフィルタchipを出す
+  const present=new Set();
+  events.forEach(e=>{if(e.yr===y&&e.mo===mo)Object.keys(e.items).forEach(k=>present.add(k));});
+  renderChips(present);
 
   // grid
   const grid=document.getElementById("grid"); grid.innerHTML="";
@@ -470,7 +476,6 @@ function boot(texts,isSample){
     return {key,name,label,color};
   });
   active=new Set(teams.filter(t=>!offNames.has(t.name)).map(t=>t.key));
-  renderChips();
 
   events=parsed.flatMap(p=>buildEvents(p.rows,p.layout,p.local,p.nameYear));
   if(!events.length){showStatus("予定を読み取れませんでした。シートの内容をご確認ください。",true);return;}

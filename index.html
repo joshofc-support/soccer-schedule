@@ -262,21 +262,33 @@ function detectLayout(rows){
   if(hIdx>0){let cur="";fill=rows[hIdx-1].map(c=>{const v=(c||"").trim();if(v)cur=v;return cur;});}
   const eff=h.map((c,i)=>(((fill[i]||"")+" "+c).trim()));   // 実効見出し（例:「Aチーム 時間」）
   const dateCol=eff.findIndex(c=>DATE_RE.test(c));
-  const timeCols=[];eff.forEach((c,i)=>{if(TIME_RE.test(c))timeCols.push(i);});
-  if(dateCol<0||!timeCols.length) return null;
-  // 日付の後～最初のチーム時間列より前にある「施設」列＝その日共通の施設（9列形式）
-  const dayVenueCol=eff.findIndex((c,i)=>VENUE_RE.test(c)&&i>dateCol&&i<timeCols[0]);
-  // 各チーム：時間列から次のチーム時間列までの範囲で、施設列・内容列を拾う
-  const tlist=timeCols.map((ti,k)=>{
-    const next=timeCols[k+1]!=null?timeCols[k+1]:eff.length;
-    let venueCol=-1,contentCol=-1;
-    for(let j=ti+1;j<next;j++){
-      if(contentCol<0&&CONT_RE.test(eff[j]))contentCol=j;
-      else if(venueCol<0&&VENUE_RE.test(eff[j]))venueCol=j;
-    }
-    if(contentCol<0)contentCol=(venueCol>=0?venueCol:ti)+1;   // 保険
-    const name=eff[ti].replace(TIME_RE,"").replace(/[:：]/g,"").trim()||`チーム${k+1}`;
-    return {name,timeCol:ti,venueCol,contentCol};
+  if(dateCol<0) return null;
+  // チーム名（Aチーム/新入生 等）が付いた列＝チームの区切り。名前が付く列は
+  // 「時間」でも「施設」でもよい（月によって並びが違うため）。名前が変わる所で新チーム。
+  const teamNameOf=s=>{const m=(s||"").match(/([A-Za-zＡ-Ｚａ-ｚ0-9０-９]+\s*チーム|新入生|[^\s]*チーム)/);
+    return m?m[1].replace(/施設|時間|内容/g,"").replace(/\s/g,""):null;};
+  const names=eff.map(teamNameOf);
+  const anchors=[];
+  for(let i=0;i<eff.length;i++){const nm=names[i];if(nm&&(!anchors.length||anchors[anchors.length-1].name!==nm))anchors.push({col:i,name:nm});}
+  if(!anchors.length) return null;
+  const firstA=anchors[0].col;
+  // 日付の後～最初のチーム列より前にある（チーム名の付かない）「施設」列＝その日共通の施設
+  const dayVenueCol=eff.findIndex((c,i)=>VENUE_RE.test(c)&&i>dateCol&&i<firstA&&!names[i]);
+  // 各チーム：区切り列から次のチーム区切り列までを1ブロックとし、内容/時間/施設を割り当てる。
+  // 見出しが無い列は残りに順に割当（時間/施設が入れ替わっても中身で後段補正）。
+  const tlist=anchors.map((a,k)=>{
+    const end=(k+1<anchors.length?anchors[k+1].col:eff.length);
+    const cols=[];for(let j=a.col;j<end;j++)cols.push(j);
+    let contentCol=cols.find(j=>CONT_RE.test(eff[j]));
+    if(contentCol==null)contentCol=cols[cols.length-1];   // 内容見出しが無ければ最後の列
+    const rest=cols.filter(j=>j!==contentCol);
+    let timeCol=rest.find(j=>TIME_RE.test(eff[j]));
+    let venueCol=rest.find(j=>VENUE_RE.test(eff[j]));
+    const leftover=rest.filter(j=>j!==timeCol&&j!==venueCol);
+    if(timeCol==null)timeCol=leftover.shift();
+    if(venueCol==null)venueCol=leftover.shift();
+    if(timeCol==null)timeCol=a.col;                       // 保険
+    return {name:a.name,timeCol,venueCol:(venueCol==null?-1:venueCol),contentCol};
   });
   return {headerIdx:hIdx,dateCol,venueCol:dayVenueCol,teams:tlist};
 }
